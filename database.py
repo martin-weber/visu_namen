@@ -1,81 +1,70 @@
-import mysql.connector
+import sys
+
 import helper
 import json
+import sqlite3
 
 
 class NamesUnitOfWork:
-
     def __init__(self):
         self.conn = None
-
 
     def __enter__(self):
         self.open()
         return self
 
-
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
-
     def open(self):
-        if (self.conn is None) or (self.conn.is_connected() == False):
-            config = {
-                'user': 'root',
-                'password': 'root',
-                'host': 'localhost',
-                'port': '8889',
-                'database': 'data_vis_project',
-                'raise_on_warnings': True,
-            }
-            self.conn = mysql.connector.connect(**config)
-
+        if (self.conn is None):
+            self.conn = sqlite3.connect('zh_namen.db')
 
     def close(self):
         if self.conn:
-            if self.conn.is_connected():
-                self.conn.close()
+            self.conn.close()
         self.conn = None
-
 
     def get_all(self):
         return self.get_by_condition()
 
-
-    def get_by_condition(self, name = None, gender = None, from_year = None, to_year = None):
+    def get_by_condition(self, name=None, gender=None, from_year=None, to_year=None):
         where = ""
         if (name != None) or (gender != None) or (from_year != None) or (to_year != None):
             where = "where"
+            params = {}
 
             if name != None and str(name).isalpha():
-                where += r" (vorname = '" + name + "')"
+                where += r" (vorname = :name )"
+                params["name"] = name
 
             if gender != None and str(gender).isalpha() and len(gender) and (gender == 'w' or gender == 'm'):
                 if (where.endswith(")")):
                     where += " and"
-                where += r" (geschlecht = '" + gender + "')"
+                where += r" (geschlecht = :gender)"
+                params["gender"] = gender
 
-            if from_year !=  None and isinstance(from_year, int):
-                if(where.endswith(")")):
+            if from_year != None and isinstance(from_year, int):
+                if (where.endswith(")")):
                     where += " and"
-                where += r" (jahrgang >= " + str(from_year) + r")"
+                where += r" (jahrgang >= :from_year)"
+                params["from_year"] = from_year
 
             if to_year != None and isinstance(to_year, int):
-                if(where.endswith(")")):
+                if (where.endswith(")")):
                     where += " and"
-                where += r" (jahrgang <= " + str(to_year) + r")"
+                where += r" (jahrgang <= :to_year)"
+                params["to_year"] = to_year
 
         query = "SELECT * FROM vornahmen_zuerich " + where + " ORDER BY jahrgang"
-        print query
-        return self.execute_query(query)
-
+        print(query)
+        return self.execute_query(query, params)
 
     def get_names_and_gender(self):
         query = "SELECT DISTINCT vorname, geschlecht FROM vornahmen_zuerich"
         return self.execute_query(query)
 
-
-    def get_summary_by_total_desc(self, limit = 100):
+    def get_summary_by_total_desc(self, limit=100):
         query = """SELECT vorname,
                           SUM(anzahl) as total,
                           AVG(anzahl) as avg_anzahl,
@@ -87,11 +76,10 @@ class NamesUnitOfWork:
                     FROM vornahmen_zuerich
                     GROUP BY vorname, geschlecht
                     ORDER BY total DESC
-                    LIMIT """ + str(limit)
-        return self.execute_query(query)
+                    LIMIT :limit"""
+        return self.execute_query(query, {"limit": limit})
 
-
-    def get_summary_by_total_desc_by_condition(self, from_year = 1900, to_year = 2016, gender = '%', limit = 100):
+    def get_summary_by_total_desc_by_condition(self, from_year=1900, to_year=2016, gender="%", limit=100):
         query = """SELECT vorname,
                           SUM(anzahl) as total,
                           AVG(anzahl) as avg_anzahl,
@@ -100,27 +88,29 @@ class NamesUnitOfWork:
                           MIN(jahrgang) as first_year,
                           MAX(jahrgang) as last_year,
                           geschlecht
-                    FROM vornahmen_zuerich """ + \
-                    "WHERE " + str(from_year) + " <= jahrgang AND jahrgang <= " + str(to_year) + " AND geschlecht like '" + gender + "' " + \
-                    """GROUP BY vorname, geschlecht
+                    FROM vornahmen_zuerich
+                    WHERE :from_year <= jahrgang AND jahrgang <= :to_year AND geschlecht like :gender
+                    GROUP BY vorname, geschlecht
                     ORDER BY total DESC
-                    LIMIT """ + str(limit)
-        return self.execute_query(query)
+                    LIMIT :limit"""
+        return self.execute_query(query, {"from_year": from_year, "to_year": to_year, "gender": gender, "limit": limit})
 
-
-    def execute_query(self, query):
+    def execute_query(self, query, parameters):
         self.open()
         cursor = self.conn.cursor()
         try:
-            cursor.execute(query)
+            cursor.execute(query, parameters)
             column_names = cursor.description
-            for row in cursor:
+            rows = cursor.fetchall()
+            for row in rows:
                 record = {column_names[index][0]: column for index, column in enumerate(row)}
                 yield record
+        except:
+            print("Unexpected error:", sys.exc_info()[0])
+            raise
         finally:
-            if(cursor != None):
+            if (cursor != None):
                 cursor.close()
-
 
     def dump_json_async(self, result_generator):
         """
@@ -138,19 +128,18 @@ class NamesUnitOfWork:
                 yield ", " + json.dumps(x, default=helper.decimal_default)
         yield ("]")
 
+
 ####################################################################################################################
 if __name__ == '__main__':
     with NamesUnitOfWork() as w:
-        print "test get_all_names()"
+        print("test get_all_names()")
         for x in w.dump_json_async(w.get_all()):
-            print x
+            print(x)
 
-        print "test get_summary()"
+        print("test get_summary()")
         for x in w.dump_json_async(w.get_summary_by_total_desc()):
-            print x
+            print(x)
 
-        print "test get_names_and_gender()"
+        print("test get_names_and_gender()")
         for x in w.dump_json_async(w.get_names_and_gender()):
-            print x
-
-
+            print(x)
