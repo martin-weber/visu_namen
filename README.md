@@ -13,5 +13,5 @@ https://data.stadt-zuerich.ch/dataset/bev-bestand-vornamen-jahrgang-geschlecht
 ```
 cd static
 npm install
-python visu_namen.py
+python3 visu_namen.py
 ```
